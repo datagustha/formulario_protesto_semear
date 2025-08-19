@@ -1,0 +1,234 @@
+/**************************
+ * FUNÇÕES DE FORMATAÇÃO *
+ **************************/
+
+function formatarDataHora(data) {
+  if (!data) return '';
+  const d = new Date(data);
+  const dia = String(d.getDate()).padStart(2, '0');
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  const ano = d.getFullYear();
+  const hora = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${dia}/${mes}/${ano} ${hora}:${min}`;
+}
+
+function formatarData(data) {
+  if (!data) return '';
+  const d = new Date(data);
+  const dia = String(d.getDate()).padStart(2, '0');
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  const ano = d.getFullYear();
+  return `${dia}/${mes}/${ano}`;
+}
+
+function converterData(valorCelula) {
+  if (!valorCelula) return '';
+
+  if (valorCelula instanceof Date && !isNaN(valorCelula.getTime())) {
+    return valorCelula.toISOString().split('T')[0];
+  }
+
+  if (typeof valorCelula === 'number' && valorCelula > 0) {
+    return new Date((valorCelula - 25569) * 86400 * 1000).toISOString().split('T')[0];
+  }
+
+  if (typeof valorCelula === 'string' && valorCelula.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+    const [dia, mes, ano] = valorCelula.split('/');
+    return new Date(ano, mes - 1, dia).toISOString().split('T')[0];
+  }
+
+  return '';
+}
+
+function formatarTelefone(tel) {
+  if (!tel) return '';
+  let telStr = tel.toString().replace(/\D/g, '');
+  if (telStr.length === 10) return telStr.replace(/(\d{2})(\d{4})(\d{4})/, '($1) $2-$3');
+  if (telStr.length === 11) return telStr.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
+  return telStr;
+}
+
+function formatarCPF(cpf) {
+  if (!cpf) return '';
+  const cpfStr = cpf.toString().replace(/\D/g, '');
+  return cpfStr.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+}
+
+/**************************
+ * FUNÇÕES PRINCIPAIS *
+ **************************/
+
+function buscarDadosContrato(numeroContrato) {
+  const ID_PLANILHA_SEMEAR = "1meyjpVrcBK5NRzxOHpnH1mIK5hs6Qc9Ku2ofumPFXQo";
+  const ss = SpreadsheetApp.openById(ID_PLANILHA_SEMEAR);
+  const aba = ss.getSheetByName("BaseContratos");
+  if (!aba) throw new Error("Aba 'BaseContratos' não encontrada.");
+
+  const dados = aba.getDataRange().getValues();
+  const cabecalho = dados[0];
+
+  function encontrarIndiceColuna(cabecalho, nomeColuna) {
+    const indice = cabecalho.findIndex(col => 
+      col.toString().trim().toLowerCase().includes(nomeColuna.toLowerCase().trim())
+    );
+    if (indice === -1) throw new Error(`Coluna '${nomeColuna}' não encontrada`);
+    return indice;
+  }
+
+  const idx = {
+    contrato: encontrarIndiceColuna(cabecalho, "Contrato"),
+    cliente: encontrarIndiceColuna(cabecalho, "Primeiro devedor"),
+    cpf: encontrarIndiceColuna(cabecalho, "CPF"),
+    tel1: encontrarIndiceColuna(cabecalho, "tel 1") || encontrarIndiceColuna(cabecalho, "Telefone 1"),
+    tel2: encontrarIndiceColuna(cabecalho, "tel 2") || encontrarIndiceColuna(cabecalho, "Telefone 2"),
+    tel3: encontrarIndiceColuna(cabecalho, "tel 3") || encontrarIndiceColuna(cabecalho, "Telefone 3"),
+    tel4: encontrarIndiceColuna(cabecalho, "tel 4") || encontrarIndiceColuna(cabecalho, "Telefone 4"),
+    vencParc: encontrarIndiceColuna(cabecalho, "Venc. Parc") || encontrarIndiceColuna(cabecalho, "Vencimento"),
+    cartorio: encontrarIndiceColuna(cabecalho, "Nome do Cartório") || encontrarIndiceColuna(cabecalho, "Cartório"),
+    protocolo: encontrarIndiceColuna(cabecalho, "Protocolo no cartório") || encontrarIndiceColuna(cabecalho, "Protocolo"),
+    proposta: encontrarIndiceColuna(cabecalho, "Proposta para Pagamento") || encontrarIndiceColuna(cabecalho, "Proposta")
+  };
+
+  const contratoBuscado = numeroContrato.toString().trim().replace(/\s+/g, '');
+  const contratoEncontrado = dados.find(row => {
+    if (!row[idx.contrato]) return false;
+    const contratoPlanilha = row[idx.contrato].toString().trim().replace(/\s+/g, '');
+    return contratoPlanilha.replace(/\//g, '') === contratoBuscado.replace(/\//g, '');
+  });
+
+  if (!contratoEncontrado) return null;
+
+  const telefones = [
+    formatarTelefone(contratoEncontrado[idx.tel1]),
+    formatarTelefone(contratoEncontrado[idx.tel2]),
+    formatarTelefone(contratoEncontrado[idx.tel3]),
+    formatarTelefone(contratoEncontrado[idx.tel4])
+  ].filter((tel, i, self) => tel && self.indexOf(tel) === i);
+
+  let propostaRaw = contratoEncontrado[idx.proposta]?.toString().trim() || '';
+  if (propostaRaw) {
+    propostaRaw = propostaRaw.replace('.', ',');  // Ex: 7474.25 -> 7474,25
+  }
+
+  return {
+    cliente: contratoEncontrado[idx.cliente]?.toString().trim() || '',
+    cpf: formatarCPF(contratoEncontrado[idx.cpf]),
+    telefones: telefones,
+    vencParc: converterData(contratoEncontrado[idx.vencParc]),
+    cartorio: contratoEncontrado[idx.cartorio]?.toString().trim() || '',
+    protocolo: contratoEncontrado[idx.protocolo]?.toString().trim() || '',
+    propostaPagamento: propostaRaw
+  };
+}
+
+function SalvarEvento(dados) {
+  try {
+    const ID_PLANILHA_SEMEAR = "1meyjpVrcBK5NRzxOHpnH1mIK5hs6Qc9Ku2ofumPFXQo";
+    const ss = SpreadsheetApp.openById(ID_PLANILHA_SEMEAR);
+
+    const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const dataHoraRegistro = new Date();
+    const nomeAba = `${meses[dataHoraRegistro.getMonth()]}-${dataHoraRegistro.getFullYear()}`;
+    let aba = ss.getSheetByName(nomeAba);
+    if (!aba) {
+      aba = ss.insertSheet(nomeAba);
+      aba.getRange('A1:R1').setValues([[ 
+        'ID', 'DataHora Registro', 'Operador', 'Contrato', 'Primeiro devedor (Cliente)', 
+        'CPF do Cliente', 'Telefone de Contato', 'Proposta para Pagamento', 
+        'Venc. Parc', 'Nome do Cartório', 'Protocolo no cartório', 'Data de Pagamento', 
+        'Atraso Contrato (dias)', 'Atraso Pagamento (dias)', 'Evento', 
+        'Canal', 'Status', 'Observações' 
+      ]]);
+    }
+
+    const validarData = (dataStr, nomeCampo) => {
+      if (!dataStr || dataStr === "Sem Pgto") return null;
+      const data = new Date(dataStr);
+      if (isNaN(data.getTime())) throw new Error(`Data ${nomeCampo} inválida`);
+      return data;
+    };
+
+    const dtVenc = validarData(dados.vencimento, "vencimento");
+    const dtPgto = validarData(dados.data_pagamento, "pagamento");
+
+    const hoje = new Date();
+    const atrasoContrato = dtVenc ? Math.max(0, Math.ceil((hoje - dtVenc) / 86400000)) : '';
+    const atrasoPgto = (dtVenc && dtPgto) ? Math.max(0, Math.ceil((dtPgto - dtVenc) / 86400000)) : '';
+
+    // Salvar a proposta como string no formato "7.474,25", sem R$
+    let propostaFormatada = '';
+    if (typeof dados.proposta_pagamento === 'string') {
+      propostaFormatada = dados.proposta_pagamento.replace(/^R\$\s*/, '').trim();
+    }
+
+    const linhaDados = [
+      aba.getLastRow(),
+      formatarDataHora(dataHoraRegistro),
+      dados.operador || '',
+      dados.contrato || '',
+      dados.cliente || '',
+      formatarCPF(dados.cpf || ''),
+      formatarTelefone(dados.telefone || ''),
+      propostaFormatada,
+      dtVenc ? formatarData(dtVenc) : '',
+      dados.nome_cartorio || '',
+      dados.protocolo || '',
+      dtPgto ? formatarData(dtPgto) : '',
+      atrasoContrato,
+      atrasoPgto,
+      dados.evento || '',
+      dados.canal || '',
+      dados.status || '',
+      dados.observacoes || ''
+    ];
+
+    aba.appendRow(linhaDados);
+
+    return { sucesso: true, mensagem: `Evento registrado com sucesso! ID: ${linhaDados[0]}` };
+
+  } catch (e) {
+    return { sucesso: false, mensagem: `Erro: ${e.message}` };
+  }
+}
+
+/**************************
+ * FUNÇÕES DE TESTE *
+ **************************/
+
+function testarBuscaContrato() {
+  const resultado = buscarDadosContrato("56239024/0");
+  console.log(resultado);
+}
+
+function testarSalvarEvento() {
+  const eventoTeste = {
+    operador: "2552FABRICIA",
+    cliente: "JORGE DE BRITO GALVAO",
+    cpf: "5226690185",
+    contrato: "56239024/0",
+    telefone: "62998402545",
+    proposta_pagamento: "7.474,25",
+    vencimento: "2020-12-08",
+    nome_cartorio: "Cartório de Protesto de Niquelândia",
+    protocolo: "95361",
+    data_pagamento: "2023-07-25",
+    evento: "Pagamento efetuado",
+    canal: "WhatsApp",
+    status: "Pago",
+    observacoes: "Teste com ordem corrigida"
+  };
+
+  const resultado = SalvarEvento(eventoTeste);
+  console.log(resultado);
+}
+
+/**************************
+ * FUNÇÃO DE INICIALIZAÇÃO *
+ **************************/
+
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('PaginaEvento')
+    .setTitle("Cadastro de Evento - PROTESTO")
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
